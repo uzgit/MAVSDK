@@ -24,6 +24,7 @@
 #include <mavsdk/mavsdk.h>
 #include <mavsdk/plugins/mavlink_passthrough/mavlink_passthrough.h>
 #include <mavsdk/plugins/telemetry/telemetry.h>
+#include <mavsdk/plugins/gimbal/gimbal.h>
 #include <mavsdk/plugins/action/action.h>
 #include <mavsdk/plugins/param_server/param_server.h>
 #include <mavsdk/plugins/param/param.h>
@@ -35,7 +36,14 @@
 using namespace mavsdk;
 using std::chrono::seconds;
 
+uint64_t channel_11;
+float gimbal_pitch_control;
 uint64_t channel_16;
+
+float interpolate(float input, float input_min, float input_max, float output_min, float output_max)
+{
+	return output_min + ((output_max - output_min) / (input_max - input_min)) * (input - input_min);
+}
 
 void subscribe_armed(Telemetry& telemetry)
 {
@@ -45,7 +53,11 @@ void subscribe_armed(Telemetry& telemetry)
 
 void rc_channels_callback( const mavlink_message_t & message )
 {
+	channel_11 = mavlink_msg_rc_channels_get_chan11_raw(&message);
 	channel_16 = mavlink_msg_rc_channels_get_chan16_raw(&message);
+
+
+//	std::cerr << "Channel 11: " << channel_11 << std::endl;
 }
 
 std::shared_ptr<System> get_system(Mavsdk& mavsdk)
@@ -100,17 +112,27 @@ int main(int argc, char** argv)
 	{
 		std::cout << "We have connected...?" << std::endl;
 	}
-
+	
+	channel_11 = 69;
+	gimbal_pitch_control = 0;
 	channel_16 = 69;
 
 	auto system = get_system(mavsdk);
 	// Instantiate plugins.
 	auto telemetry = Telemetry{system};
+	auto gimbal = Gimbal{system};
 	auto mavlink_passthrough = MavlinkPassthrough{system};
 
 	subscribe_armed(telemetry);
 
 	mavlink_passthrough.subscribe_message(MAVLINK_MSG_ID_RC_CHANNELS, rc_channels_callback);
+
+	std::cout << "Start controlling gimbal...\n";
+	Gimbal::Result gimbal_result = gimbal.take_control(Gimbal::ControlMode::Primary);
+	if (gimbal_result != Gimbal::Result::Success) {
+		std::cerr << "Could not take gimbal control: " << gimbal_result << '\n';
+		return 1;
+	}
 
 	// say hello
 	std::cout << "Starting D455 depth stream..." << std::endl;
@@ -162,6 +184,36 @@ int main(int argc, char** argv)
 			cv::Mat color_image(cv::Size(WIDTH, HEIGHT), CV_8UC3, (void*)frame_data_color, cv::Mat::AUTO_STEP);
 			cv::imshow(window_name, color_image);
 		}
+
+		std::cout << "Channel 11: " << channel_11
+			<< " -> interpolated: "
+			<< interpolate( (float)channel_11, 1000, 2000, -1, 1)
+			<< std::endl;
+
+		gimbal_pitch_control = interpolate( (float)channel_11, 1000, 2000, -1, 1);
+		if( abs(gimbal_pitch_control) > 0.05 )
+		{
+			gimbal.set_pitch_rate_and_yaw_rate( 75 * (float)gimbal_pitch_control , 0.0f);
+		}
+		else
+		{
+			gimbal.set_pitch_rate_and_yaw_rate( 0.0f , 0.0f);
+		}
+
+/*		
+		if( channel_11 > 1600 )
+		{
+			gimbal.set_pitch_rate_and_yaw_rate(-10.0f, 0.0f);
+		}
+		else if( channel_11 < 1400 )
+		{
+			gimbal.set_pitch_rate_and_yaw_rate(10.0f, 0.0f);
+		}
+		else
+		{
+			gimbal.set_pitch_rate_and_yaw_rate(0.0f, 0.0f);
+		}
+*/
 
 		// wait a bit so the images actually appear
 		cv::waitKey(1);
