@@ -6,7 +6,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 project(stream)
 
 add_executable(stream
-    stream.cpp
+	stream.cpp
+)
+
+add_executable(stream_and_save
+	stream_and_save.cpp
 )
 
 find_package(MAVSDK REQUIRED)
@@ -17,6 +21,13 @@ find_package(Threads REQUIRED)
 include_directories( ${OpenCV_INCLUDE_DIRS} )
 
 target_link_libraries(stream
+    MAVSDK::mavsdk
+    ${OpenCV_LIBS}
+    realsense2
+    ${CMAKE_THREAD_LIBS_INIT}
+)
+
+target_link_libraries(stream_and_save
     MAVSDK::mavsdk
     ${OpenCV_LIBS}
     realsense2
